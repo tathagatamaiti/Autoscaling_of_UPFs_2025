@@ -104,7 +104,7 @@ def upper_bound_cpu_constraint(model, j, i):
 model.upper_bound_cpu_constraint = Constraint(model.Aq, model.U, rule=upper_bound_cpu_constraint)
 
 # Solving the model
-solver = SolverFactory("glpk")  # Substitute with appropriate solver
+solver = SolverFactory("glpk")
 result = solver.solve(model)
 
 # Collect results

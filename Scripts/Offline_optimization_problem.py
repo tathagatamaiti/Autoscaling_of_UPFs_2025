@@ -4,8 +4,8 @@ from pyomo.environ import Binary, NonNegativeReals
 from pyomo.opt import SolverFactory
 
 # Load datasets with pandas
-pdu_data = pd.read_csv("pdu_data.csv")  # Columns: id, start_time, end_time, rate, latency, instance_id
-upf_data = pd.read_csv("upf_data.csv")  # Columns: id, workload_factor, cpu_capacity, memory, network_connectivity
+pdu_data = pd.read_csv("pdu_data.csv")  # Columns: id, start_time, end_time, rate, latency
+upf_data = pd.read_csv("upf_data.csv")  # Columns: id, workload_factor, cpu_capacity
 
 # Create sets and dictionaries from datasets
 A = pdu_data['id'].tolist()  # Set of PDU sessions
@@ -26,9 +26,9 @@ T = sorted(set(pdu_data['start_time']).union(set(pdu_data['end_time'])))
 model = ConcreteModel()
 
 # Define Sets
-model.A = Set(initialize=A)
-model.U = Set(initialize=U)
-model.T = Set(initialize=T)
+model.A = Set(initialize=A) # Set of PDU sessions
+model.U = Set(initialize=U) # Set of all UPF instances
+model.T = Set(initialize=T) # Set of time instances
 
 # Define Parameters
 model.start_time = Param(model.A, initialize=start_time)

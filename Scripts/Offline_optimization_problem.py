@@ -1,51 +1,42 @@
 import pandas as pd
 from pyomo.environ import *
-from pyomo.environ import Binary, NonNegativeReals
 from pyomo.opt import SolverFactory
 
 # Load datasets with pandas
-pdu_data = pd.read_csv("pdu_data.csv")  # Columns: id, start_time, end_time, rate, latency
-upf_data = pd.read_csv("upf_data.csv")  # Columns: id, workload_factor, cpu_capacity
-
-# Create sets and dictionaries from datasets
-A = pdu_data['id'].tolist()  # Set of PDU sessions
-U = upf_data['id'].tolist()  # Set of UPF instances
-
-# Parameters for each PDU and UPF session based on input data
-start_time = dict(zip(pdu_data['id'], pdu_data['start_time']))
-end_time = dict(zip(pdu_data['id'], pdu_data['end_time']))
-rate = dict(zip(pdu_data['id'], pdu_data['rate']))
-latency = dict(zip(pdu_data['id'], pdu_data['latency']))
-cpu_capacity = dict(zip(upf_data['id'], upf_data['cpu_capacity']))
-workload_factor = dict(zip(upf_data['id'], upf_data['workload_factor']))
-
-# Generate the time set T based on unique start and end times
-T = sorted(set(pdu_data['start_time']).union(set(pdu_data['end_time'])))
+pdu_data = pd.read_csv('pdu_sessions.csv')  # Columns: id, start, end, latency, rate
+upf_data = pd.read_csv('upf_instances.csv')  # Columns: instance id, workload factor, CPU capacity
 
 # Create model
 model = ConcreteModel()
 
 # Define Sets
-model.A = Set(initialize=A) # Set of PDU sessions
-model.U = Set(initialize=U) # Set of all UPF instances
-model.T = Set(initialize=T) # Set of time instances
+time_points = sorted(set(pdu_data['start']).union(set(pdu_data['end'])))
+model.T = Set(initialize=time_points, ordered=True)  # Set of time instances
+model.A = Set(initialize=pdu_data['id'].tolist())  # Set of PDU sessions
+model.U = Set(initialize=upf_data['instance_id'].tolist())  # Set of all UPF instances
 
 # Define Parameters
-model.start_time = Param(model.A, initialize=start_time)
-model.end_time = Param(model.A, initialize=end_time)
-model.rate = Param(model.A, initialize=rate)
-model.latency = Param(model.A, initialize=latency)
-model.cpu_capacity = Param(model.U, initialize=cpu_capacity)
-model.workload_factor = Param(model.U, initialize=workload_factor)
+pdu_dict = pdu_data.set_index('id').to_dict()  # Convert PDU data to dictionary
+upf_dict = upf_data.set_index('instance_id').to_dict()  # Convert UPF data to dictionary
+
+model.τ = Param(model.A, initialize=pdu_dict['start'])  # Start time of PDU session
+model.ϵ = Param(model.A, initialize={j: pdu_dict['end'][j] - pdu_dict['start'][j] for j in model.A})  # Activity time of PDU
+model.l = Param(model.A, initialize=pdu_dict['latency'])  # Latency requirement of PDU session
+model.r = Param(model.A, initialize=pdu_dict['rate'])  # Data rate of PDU session
+model.C = Param(model.U, initialize=upf_dict['cpu_capacity'])  # CPU capacity of UPF instance
+model.w = Param(model.U, initialize=upf_dict['workload_factor'])  # Workload factor of UPF instance
 
 # Define Variables
-model.z = Var(model.A, within=Binary)  # Admittance of PDU session j
-model.x = Var(model.U, model.T, within=Binary)  # Activity of UPF instance i at time n
-model.y = Var(model.A, model.U, within=Binary)  # Assignment of PDU j to UPF i
-model.s = Var(model.A, model.U, model.T, within=NonNegativeReals)  # CPU share of i assigned to j at time n
+model.z = Var(model.A, within=Binary)  # Binary indicating if a PDU session is admitted
+model.x = Var(model.U, model.T, within=Binary)  # Binary for UPF instance active status at time n
+model.y = Var(model.A, model.U, within=Binary)  # Binary indicating if PDU session j is anchored to UPF instance i
+model.s = Var(model.A, model.U, model.T, within=NonNegativeReals)  # CPU share allocated
+
+# Auxiliary variables
+model.h = Var(model.U, model.T, within=NonNegativeIntegers)  # Number of PDU sessions anchored to UPF at time n
 
 # Objective function
-gamma = 0.0001  # Penalty factor
+gamma = 0.00001  # Penalty factor
 model.obj = Objective(
     expr=sum(model.z[j] for j in model.A) - gamma * sum(model.x[i, n] for i in model.U for n in model.T),
     sense=maximize
@@ -58,9 +49,9 @@ def admittance_constraint(model, j):
 model.admittance_constraint = Constraint(model.A, rule=admittance_constraint)
 
 # Constraint (4): zj >= y[j, i]
-def reverse_admittance_constraint(model, j, i):
-    return model.z[j] >= model.y[j, i]
-model.reverse_admittance_constraint = Constraint(model.A, model.U, rule=reverse_admittance_constraint)
+def reverse_admittance_constraint(model, j):
+    return model.z[j] >= sum(model.y[j, i] for i in model.U)
+model.reverse_admittance_constraint = Constraint(model.A, rule=reverse_admittance_constraint)
 
 # Constraint (5): sum(y[j, i] for i in model.U) <= 1
 def single_assignment_constraint(model, j):
@@ -69,84 +60,82 @@ model.single_assignment_constraint = Constraint(model.A, rule=single_assignment_
 
 # Constraint (6): y[j, i] <= M1 * x[i, n]
 M1 = 1e9  # Large constant
-def deployment_constraint(model, j, i, n):
-    if model.start_time[j] <= n <= model.end_time[j]:
-        return model.y[j, i] <= M1 * model.x[i, n]
-    else:
-        return Constraint.Skip
-model.deployment_constraint = Constraint(model.A, model.U, model.T, rule=deployment_constraint)
+model.deployment_constraint = ConstraintList()
+for j in model.A:
+    for i in model.U:
+        for n in model.T:
+            if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j]:
+                model.deployment_constraint.add(model.y[j, i] <= M1 * model.x[i, n])
 
 # Constraint (7): x[i, n] >= y[j, i]
-def continuity_constraint(model, j, i, n):
-    if model.start_time[j] <= n <= model.end_time[j]:
-        return model.x[i, n] >= model.y[j, i]
-    else:
-        return Constraint.Skip
-model.continuity_constraint = Constraint(model.A, model.U, model.T, rule=continuity_constraint)
+model.continuity_constraint = ConstraintList()
+for j in model.A:
+    for i in model.U:
+        for n in model.T:
+            if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j]:
+                model.continuity_constraint.add(model.x[i, n] >= model.y[j, i])
 
 # Constraint (8): x[i, n] <= sum(y[j, i] for j in model.A)
 def scale_in_constraint(model, i, n):
-    return model.x[i, n] <= sum(model.y[j, i] for j in model.A if model.start_time[j] <= n <= model.end_time[j])
+    return model.x[i, n] <= sum(model.y[j, i] for j in model.A if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j])
 model.scale_in_constraint = Constraint(model.U, model.T, rule=scale_in_constraint)
 
-# Constraint (9): sum(s[j, i, n] for j in A if start_time[j] <= n <= end_time[j]) == cpu_capacity[i]
+# Constraint (9): sum(s[j, i, n] for j in A if start_time[j] <= n <= end_time[j]) <= cpu_capacity[i]
 def cpu_capacity_constraint(model, i, n):
-    active_pdus = [j for j in model.A if model.start_time[j] <= n <= model.end_time[j]]
-    if active_pdus:
-        return sum(model.s[j, i, n] for j in active_pdus) == model.cpu_capacity[i]
-    return Constraint.Skip
-model.cpu_capacity_constraint = Constraint(model.U, model.T, rule=cpu_capacity_constraint)
+    return sum(model.s[j, i, n] for j in model.A if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j]) <= model.C[i]
+model.cpu_allocation_constraint = Constraint(model.U, model.T, rule=cpu_capacity_constraint)
 
-# Constraint (10): s[j, i, n] <= (cpu_capacity[i] / sum(y[j, i] for j in A)) * y[j, i]
-def equal_cpu_share_constraint(model, j, i, n):
-    if model.start_time[j] <= n <= model.end_time[j]:
-        return model.s[j, i, n] <= (model.cpu_capacity[i] / sum(model.y[k, i] for k in model.A)) * model.y[j, i]
-    return Constraint.Skip
-model.equal_cpu_share_constraint = Constraint(model.A, model.U, model.T, rule=equal_cpu_share_constraint)
+# Constraint (11): s[j, i, n] <= (cpu_capacity[i] for j in A)
+model.equal_cpu_share_constraint = ConstraintList()
+for j in model.A:
+    for i in model.U:
+        for n in model.T:
+            if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j]:
+                model.equal_cpu_share_constraint.add(model.s[j, i, n] <= model.C[i])
 
-# Constraint (11): s[j, i, n] >= (cpu_capacity[i] / sum(y[j, i] for j in A)) * y[j, i]
-def equal_cpu_share_lower_bound_constraint(model, j, i, n):
-    if model.start_time[j] <= n <= model.end_time[j]:
-        return model.s[j, i, n] >= (model.cpu_capacity[i] / sum(model.y[k, i] for k in model.A)) * model.y[j, i]
-    return Constraint.Skip
-model.equal_cpu_share_lower_bound_constraint = Constraint(model.A, model.U, model.T, rule=equal_cpu_share_lower_bound_constraint)
-
-# Constraint (12): sum(s[j, i, n] for j in A) == cpu_capacity[i]
-def cpu_share_sum_constraint(model, i, n):
-    active_pdus = [j for j in model.A if model.start_time[j] <= n <= model.end_time[j]]
-    if active_pdus:
-        return sum(model.s[j, i, n] for j in active_pdus) == model.cpu_capacity[i]
-    return Constraint.Skip
-model.cpu_share_sum_constraint = Constraint(model.U, model.T, rule=cpu_share_sum_constraint)
+# Constraint (12): Link the number of active sessions to the anchored sessions
+def cpu_link_constraint(model, i, n):
+    return model.h[i, n] == sum(model.y[j, i] for j in model.A if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j])
+model.cpu_link_constraint = Constraint(model.U, model.T, rule=cpu_link_constraint)
 
 # Constraint (13): workload_factor[i] * rate[j] * y[j, i] <= s[j, i, n] * latency[j]
-def latency_constraint(model, j, i, n):
-    if model.start_time[j] <= n <= model.end_time[j]:
-        return model.workload_factor[i] * model.rate[j] * model.y[j, i] <= model.s[j, i, n] * model.latency[j]
-    return Constraint.Skip
-model.latency_constraint = Constraint(model.A, model.U, model.T, rule=latency_constraint)
+model.latency_constraint = ConstraintList()
+for j in model.A:
+    for i in model.U:
+        for n in model.T:
+            if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j]:
+                model.latency_constraint.add(
+                    model.w[i] * model.r[j] * model.y[j, i] <= model.s[j, i, n] * model.l[j]
+                )
 
 # Constraint (14): s[j, i, n] <= M2 * y[j, i]
-M2 = 1e9  # Large constant
-def upper_bound_cpu_constraint(model, j, i, n):
-    if model.start_time[j] <= n <= model.end_time[j]:
-        return model.s[j, i, n] <= M2 * model.y[j, i]
-    return Constraint.Skip
-model.upper_bound_cpu_constraint = Constraint(model.A, model.U, model.T, rule=upper_bound_cpu_constraint)
+M2 = 1e9  # Another large constant
+model.upper_bound_cpu_constraint = ConstraintList()
+for j in model.A:
+    for i in model.U:
+        for n in model.T:
+            if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j]:
+                model.upper_bound_cpu_constraint.add(model.s[j, i, n] <= M2 * model.y[j, i])
 
-# Solving the model
-solver = SolverFactory("glpk")
-results = []
-for n in model.T:
-    # Update constraints and solve the model at each time instance n
-    result = solver.solve(model)
-    # Collect results
-    results.append({
-        "time": n,
-        "PDU_sessions_admitted": sum(model.z[j]() for j in model.A),
-        "UPFs_active": sum(model.x[i, n]() for i in model.U),
-    })
+# Solve the model
+solver = SolverFactory('glpk')
+results = solver.solve(model, tee=True)
 
 # Save results to CSV
-results_df = pd.DataFrame(results)
-results_df.to_csv("upf_scaling_results.csv", index=False)
+output = []
+for j in model.A:
+    for i in model.U:
+        for n in model.T:
+            output.append({
+                'PDU_session': j,
+                'UPF_instance': i,
+                'Time_instance': n,
+                'Admission_status': model.z[j].value,
+                'UPF_active': model.x[i, n].value,
+                'Anchoring': model.y[j, i].value,
+                'CPU_share': model.s[j, i, n].value if model.s[j, i, n].value else 0
+            })
+
+# Output results to a CSV file
+results_df = pd.DataFrame(output)
+results_df.to_csv('offline_solution.csv', index=False)

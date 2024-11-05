@@ -4,12 +4,12 @@ import random
 # Seed for reproducibility
 random.seed(42)
 
-# Generate PDU sessions dataset
-def generate_pdu_sessions(filename='pdu_sessions.csv', num_pdus=100):
+# Generate PDU sessions dataset with sequential start times
+def generate_pdu_sessions(filename='pdu_sessions.csv', num_pdus=10):
     pdu_data = []
     for i in range(1, num_pdus + 1):
-        start = random.randint(0, 3600)
-        end = start + random.randint(1, 50)
+        start = i * 10  # Sequential start times
+        end = start + random.randint(1, 50)  # Random duration added to start time
         rate = random.randint(10, 20)  # Rate
         latency = random.choice([0.1, 0.2, 0.3, 0.4, 0.5])  # Latency requirement
 
@@ -29,11 +29,11 @@ def generate_pdu_sessions(filename='pdu_sessions.csv', num_pdus=100):
 
 
 # Generate UPF instances dataset
-def generate_upf_instances(filename='upf_instances.csv', num_upfs=2):
+def generate_upf_instances(filename='upf_instances.csv', num_upfs=3):
     upf_data = []
     for i in range(1, num_upfs + 1):
         workload_factor = 1  # Workload factor
-        cpu_capacity = 100  # CPU capacity
+        cpu_capacity = 200  # CPU capacity
 
         # Append to the dataset
         upf_data.append({

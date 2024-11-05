@@ -117,6 +117,54 @@ for j in model.A:
             if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j]:
                 model.upper_bound_cpu_constraint.add(model.s[j, i, n] <= M2 * model.y[j, i])
 
+# # Define sin as a variable
+# model.sin = Var(model.U, model.T, within=NonNegativeReals)
+#
+# # Define active_indicator as a binary variable
+# model.active_indicator = Var(model.U, model.T, within=Binary)
+#
+# # Initialize sin_constraint as a ConstraintList
+# model.sin_constraint = ConstraintList()
+#
+# # Link active_indicator to the presence of active sessions
+# for i in model.U:
+#     for n in model.T:
+#         # Ensure active_indicator is 1 if there are any active sessions anchored to UPF i at time n
+#         model.sin_constraint.add(
+#             sum(model.y[j, i] for j in model.A if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j]) <= model.active_indicator[i, n] * len(model.A)
+#         )
+#         # Ensure active_indicator is 0 if there are no active sessions
+#         model.sin_constraint.add(
+#             sum(model.y[j, i] for j in model.A if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j]) >= model.active_indicator[i, n]
+#         )
+#
+# # Define sin based on active_indicator
+# for i in model.U:
+#     for n in model.T:
+#         active_sessions = sum(model.y[j, i] for j in model.A if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j])
+#
+#         # When active_indicator is 1, sin = C_i / active_sessions
+#         model.sin_constraint.add(model.sin[i, n] <= model.C[i] / (active_sessions + (1 - model.active_indicator[i, n])))
+#
+#         # When active_indicator is 0, sin should be 0
+#         model.sin_constraint.add(model.sin[i, n] <= model.C[i] * model.active_indicator[i, n])
+#
+# # Constraint: sjin <= sin * yji
+# model.lower_cpu_share_constraint = ConstraintList()
+# for j in model.A:
+#     for i in model.U:
+#         for n in model.T:
+#             if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j]:
+#                 model.lower_cpu_share_constraint.add(model.s[j, i, n] <= model.sin[i, n] * model.y[j, i])
+#
+# # Constraint: sjin >= sin * yji
+# model.upper_cpu_share_constraint = ConstraintList()
+# for j in model.A:
+#     for i in model.U:
+#         for n in model.T:
+#             if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j]:
+#                 model.upper_cpu_share_constraint.add(model.s[j, i, n] >= model.sin[i, n] * model.y[j, i])
+
 # Solve the model
 solver = SolverFactory('glpk')
 results = solver.solve(model, tee=True)

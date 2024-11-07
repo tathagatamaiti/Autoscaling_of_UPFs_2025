@@ -80,9 +80,9 @@ def scale_in_constraint(model, i, n):
     return model.x[i, n] <= sum(model.y[j, i] for j in model.A if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j])
 model.scale_in_constraint = Constraint(model.U, model.T, rule=scale_in_constraint)
 
-# Constraint (9): sum(s[j, i, n] for j in A if start_time[j] <= n <= end_time[j]) <= cpu_capacity[i]
+# Constraint (9): sum(s[j, i, n] for j in A if start_time[j] <= n <= end_time[j]) == cpu_capacity[i]*x[i,n]
 def cpu_capacity_constraint(model, i, n):
-    return sum(model.s[j, i, n] for j in model.A if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j]) <= model.C[i]
+    return sum(model.s[j, i, n] for j in model.A if n >= model.τ[j] and n <= model.τ[j] + model.ϵ[j]) == model.C[i]*model.x[i,n]
 model.cpu_allocation_constraint = Constraint(model.U, model.T, rule=cpu_capacity_constraint)
 
 # Constraint (11): s[j, i, n] <= (cpu_capacity[i] for j in A)
@@ -166,14 +166,33 @@ for j in model.A:
 #                 model.upper_cpu_share_constraint.add(model.s[j, i, n] >= model.sin[i, n] * model.y[j, i])
 
 # Solve the model
-solver = SolverFactory('glpk')
+solver = SolverFactory('scip', executable='/home/tmaiti/Downloads/SCIPOptSuite-9.1.1-Linux/bin/scip')
 results = solver.solve(model, tee=True)
+
+# Objective value
+print(f"Objective value: {model.obj.expr()}")
+
+# Solver Status and Termination Condition
+print("Solver Status:", results.solver.status)
+print("Solution Status:", results.solver.termination_condition)
+
+# Retrieve variable values
+print("Variable Values:")
+for v in model.component_objects(Var, active=True):
+    varobject = getattr(model, str(v))
+    print(f"Variable {v} values:")
+    for index in varobject:
+        print(f"   {index} : {varobject[index].value}")
 
 # Save results to CSV
 output = []
 for j in model.A:
     for i in model.U:
         for n in model.T:
+            if model.s[j, i, n].value and model.y[j, i].value:
+                observed_latency = (model.w[i] * model.r[j] * model.y[j, i].value) / model.s[j, i, n].value
+            else:
+                observed_latency = None
             output.append({
                 'PDU_session': j,
                 'UPF_instance': i,
@@ -181,7 +200,8 @@ for j in model.A:
                 'Admission_status': model.z[j].value,
                 'UPF_active': model.x[i, n].value,
                 'Anchoring': model.y[j, i].value,
-                'CPU_share': model.s[j, i, n].value if model.s[j, i, n].value else 0
+                'CPU_share': model.s[j, i, n].value,
+                'Observed_latency': observed_latency
             })
 
 # Output results to a CSV file

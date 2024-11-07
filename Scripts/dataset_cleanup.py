@@ -4,15 +4,15 @@ import pandas as pd
 df = pd.read_csv('offline_solution.csv')
 
 # Filter rows where Admission_status is 1 and CPU_share > 0
-filtered_df = df[(df['Admission_status'] == 1) & (df['CPU_share'] > 0)]
+filtered_df = df[(df['Admission_status'] == 1) & (df['CPU_share'] != 0)]
 
 # Group by PDU_session and average CPU_share and Time_instance
 averaged_df = filtered_df.groupby('PDU_session', as_index=False).agg({
-    'UPF_instance': 'first',
+    #'UPF_instance': 'first',
     'Time_instance': 'mean',       # Calculate the mean of Time_instance for each PDU_session
-    'Admission_status': 'first',
-    'UPF_active': 'first',
-    'Anchoring': 'first',
+    #'Admission_status': 'first',
+    #'UPF_active': 'first',
+    #'Anchoring': 'first',
     'CPU_share': 'mean'            # Calculate the mean of CPU_share for each PDU_session
 })
 

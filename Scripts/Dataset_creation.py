@@ -5,7 +5,7 @@ import random
 random.seed(42)
 
 # Generate PDU sessions dataset with sequential start times
-def generate_pdu_sessions(filename='pdu_sessions.csv', num_pdus=200):
+def generate_pdu_sessions(filename='pdu_sessions.csv', num_pdus=20):
     pdu_data = []
     for i in range(1, num_pdus + 1):
         start = i * 10  # Sequential start times
@@ -29,7 +29,7 @@ def generate_pdu_sessions(filename='pdu_sessions.csv', num_pdus=200):
 
 
 # Generate UPF instances dataset
-def generate_upf_instances(filename='upf_instances.csv', num_upfs=25):
+def generate_upf_instances(filename='upf_instances.csv', num_upfs=3):
     upf_data = []
     for i in range(1, num_upfs + 1):
         workload_factor = 1  # Workload factor

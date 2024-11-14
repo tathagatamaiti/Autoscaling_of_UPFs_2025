@@ -9,24 +9,26 @@ pdu_sessions = pd.read_csv('pdu_sessions.csv')
 merged_data = merged_data.merge(pdu_sessions[['id', 'latency']], left_on='PDU_session', right_on='id', how='left')
 merged_data.rename(columns={'latency': 'Required_latency'}, inplace=True)
 
-# Calculate the average observed latency for each PDU session
-average_observed_latency = merged_data.groupby('PDU_session')['Observed_latency'].mean()
+# Calculate the normalized latency for each time instance of each PDU session
+merged_data['Normalized_latency'] = merged_data['Observed_latency'] / merged_data['Required_latency']
 
-# Calculate the normalized averaged latency for each PDU session
-normalized_average_latency = average_observed_latency / merged_data.groupby('PDU_session')['Required_latency'].first()
+# Identify the UPF instance with the maximum CPU share for each PDU session at each time instance
+merged_data['Max_CPU_UPF'] = merged_data.groupby('PDU_session')['CPU_share'].transform(lambda x: merged_data.loc[x.idxmax(), 'UPF_instance'])
 
-# Plot the normalized time-averaged latency for each PDU session
+# Plot the normalized latency over time for each PDU session with legend including the UPF instance
 plt.figure(figsize=(20, 10))
-plt.scatter(normalized_average_latency.index, normalized_average_latency.values, marker='o')
+for pdu_session, session_data in merged_data.groupby('PDU_session'):
+    plt.scatter(session_data['Time_instance'], session_data['Normalized_latency'], label=f'PDU {pdu_session} (UPF: {session_data["Max_CPU_UPF"].iloc[0]})')
+
 plt.axhline(y=1, color='r', linestyle='--', label='Normalized Latency Bound')
-plt.xlabel('PDU Session', fontsize=20)
-plt.ylabel('Normalized Average Latency', fontsize=20)
-plt.title('Normalized Average Latency for Each PDU Session', fontsize=25)
-plt.xticks(normalized_average_latency.index)
+plt.xlabel('Time Instance', fontsize=20)
+plt.ylabel('Normalized Latency', fontsize=20)
+plt.title('Normalized Latency Over Time for Each PDU Session', fontsize=25)
 plt.xticks(fontsize=18)
 plt.yticks(fontsize=18)
-plt.legend(fontsize=18)
+plt.legend(fontsize=10, loc='lower left')
 plt.grid(True)
 
-#Save plot
-plt.savefig('PDU_latency.png', format='png')
+# Save plot
+plt.savefig('Normalized_Latency_PDU_Time.png', format='png')
+

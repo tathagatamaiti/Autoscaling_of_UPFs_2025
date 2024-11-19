@@ -9,19 +9,19 @@ upf_data = pd.read_csv('upf_instances.csv')  # Columns: instance_id, workload_fa
 # Sort PDU data by start time
 pdu_data = pdu_data.sort_values(by="start")
 
-# Model parameters
-time_step = 10  # Time step for intervals
-time_horizon = max(pdu_data["end"])
-
 # Prepare results storage
 results_list = []
 
 # Track assignments across intervals
 pdu_to_upf_assignment = {}
 
-# Loop through time intervals
-for t_start in range(0, time_horizon + 1, time_step):
-    t_end = t_start + time_step
+# Extract unique start times for intervals
+unique_start_times = sorted(pdu_data["start"].unique())
+
+# Loop through dynamic intervals
+for idx, t_start in enumerate(unique_start_times):
+    # Determine interval end
+    t_end = unique_start_times[idx + 1] if idx + 1 < len(unique_start_times) else max(pdu_data["end"])
 
     # Filter PDU sessions active in the current time window
     active_pdu = pdu_data[(pdu_data["start"] < t_end) & (pdu_data["end"] >= t_start)]
@@ -146,7 +146,7 @@ for t_start in range(0, time_horizon + 1, time_step):
     # Store assignments for consistency in future intervals
     for j in model.A:
         for i in model.U:
-            if model.y[j, i].value > 0.9:
+            if model.y[j, i].value > 0.9:  # If PDU is assigned to UPF i
                 pdu_to_upf_assignment[j] = i
 
     # Store results
@@ -173,4 +173,4 @@ for t_start in range(0, time_horizon + 1, time_step):
 
 # Save results to CSV
 results_df = pd.DataFrame(results_list)
-results_df.to_csv('offline_solution_intervals_consistent.csv', index=False)
+results_df.to_csv('dynamic_interval_solution.csv', index=False)
